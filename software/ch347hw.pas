@@ -17,6 +17,7 @@ private
   FDevHandle: Longint;
   FStrError: string;
   FDevSPIConfig: _SPI_CONFIG;
+  FVoltage: TVoltState;  //last selected programming voltage (desired state)
 public
   constructor Create;
   destructor Destroy; override;
@@ -24,6 +25,10 @@ public
   function GetLastError: string; override;
   function DevOpen: boolean; override;
   procedure DevClose; override;
+
+  //Programming voltage switching (CH347 v2 hardware: GPIO6 controls 1.8V/3.3V)
+  procedure SetVoltage(volt18: boolean); override;
+  function GetVoltage: TVoltState; override;
 
   //spi
   function SPIRead(CS: byte; BufferLen: integer; var buffer: array of byte): integer; override;
@@ -61,6 +66,7 @@ begin
   FDevHandle := -1;
   FHardwareName := 'CH347';
   FHardwareID := CHW_CH347;
+  FVoltage := vsUnknown;  //resolved from saved setting / device read-back
 end;
 
 destructor TCH347Hardware.Destroy;
@@ -98,6 +104,12 @@ begin
     end;
 
   FDevOpened := true;
+
+  //Re-assert the desired programming voltage. The CH347 v2 firmware powers up at 1.8V on
+  //every (re)plug, so re-applying here guarantees the correct level before any SPI operation.
+  if FVoltage <> vsUnknown then
+    SetVoltage(FVoltage = vs1_8V);
+
   Result := true;
 end;
 
@@ -109,6 +121,39 @@ begin
     FDevHandle := -1;
     FDevOpened := false;
   end;
+end;
+
+
+//VOLTAGE_______________________________________________________________________
+//CH347 v2 hardware: GPIO6 (mask $40) drives the on-board VCC selector.
+//Calibrated on real hardware: iSetDataOut bit6 = 1 ($40) -> 1.8V, = 0 -> 3.3V.
+//The GPIO microwire code only uses bits 0-3, so bit6 is conflict-free (iEnable is a per-bit mask).
+
+procedure TCH347Hardware.SetVoltage(volt18: boolean);
+var
+  dataOut: byte;
+begin
+  if volt18 then FVoltage := vs1_8V else FVoltage := vs3_3V;
+  if FDevHandle < 0 then Exit;  //re-asserted by DevOpen once the device is open
+
+  if volt18 then dataOut := $40 else dataOut := $00;
+  CH347GPIO_Set(FDevHandle, $40, $40, dataOut);  //enable=GPIO6, dir=output, data=level
+end;
+
+function TCH347Hardware.GetVoltage: TVoltState;
+var
+  dir, dat: byte;  //matches the @byte/PCHAR pattern used by ReadBit/MWIsBusy
+begin
+  Result := vsUnknown;
+  if FDevHandle < 0 then Exit;
+  dir := 0;
+  dat := 0;
+  if not CH347GPIO_Get(FDevHandle, @dir, @dat) then Exit;
+
+  //The GPIO6 line reflects the actual VCC selection regardless of pin direction: it sits HIGH at
+  //1.8V and LOW at 3.3V, whether driven (output) or sampled after the direction reverts to input
+  //on device close/reopen. So decide purely from the data bit (calibrated on real hardware).
+  if (dat and $40) <> 0 then Result := vs1_8V else Result := vs3_3V;
 end;
 
 

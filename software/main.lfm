@@ -604,7 +604,7 @@ object MainForm: TMainForm
     FocusFrame = True
     NoSizeChange = True
     DrawGridLines = True
-    Version = 'september 30, 2007; © markus stephany, vcl[at]mirkes[dot]de'
+    Version = 'september 30, 2007; ï¿½ markus stephany, vcl[at]mirkes[dot]de'
     OnChange = MPHexEditorExChange
     DrawGutter3D = False
     ShowRuler = True
@@ -753,7 +753,6 @@ object MainForm: TMainForm
           object MenuCH347SPIClock60MHz: TMenuItem
             AutoCheck = True
             Caption = '60 MHz'
-            Checked = True
             RadioItem = True
           end
           object MenuCH347SPIClock30MHz: TMenuItem
@@ -766,6 +765,7 @@ object MainForm: TMainForm
             Tag = 2
             AutoCheck = True
             Caption = '15 MHz'
+            Checked = True
             RadioItem = True
           end
           object MenuCH347SPIClock7_5MHz: TMenuItem
@@ -797,6 +797,23 @@ object MainForm: TMainForm
             AutoCheck = True
             Caption = '468.75 KHz'
             RadioItem = True
+          end
+        end
+        object MenuCH347Voltage: TMenuItem
+          Caption = 'Voltage'
+          object MenuCH347Volt3_3V: TMenuItem
+            AutoCheck = True
+            Caption = '3.3V'
+            RadioItem = True
+            OnClick = MenuCH347Volt3_3VClick
+          end
+          object MenuCH347Volt1_8V: TMenuItem
+            Tag = 1
+            AutoCheck = True
+            Caption = '1.8V'
+            Checked = True
+            RadioItem = True
+            OnClick = MenuCH347Volt1_8VClick
           end
         end
         object MenuArduinoSPIClock: TMenuItem

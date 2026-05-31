@@ -12,6 +12,9 @@ type
 //List of devices
 THardwareList = (CHW_NONE, CHW_CH341, CHW_CH347, CHW_AVRISP, CHW_USBASP, CHW_ARDUINO, CHW_FT232H);
 
+//Programming voltage state (used by CH347 v2 hardware with software-switchable VCC)
+TVoltState = (vsUnknown, vs1_8V, vs3_3V);
+
 //Base class for hardware
 TBaseHardware = class
 protected
@@ -49,6 +52,10 @@ public
   //return number of bits written
   function MWWrite(CS: byte; BitsWrite: byte; buffer: array of byte): integer; virtual; abstract;
   function MWIsBusy: boolean; virtual; abstract;
+
+  //Programming voltage (only CH347 v2 hardware overrides these; others are inert no-ops)
+  procedure SetVoltage(volt18: boolean); virtual;
+  function GetVoltage: TVoltState; virtual;
 end;
 
 //Class for manipulating hw
@@ -70,6 +77,17 @@ public
 end;
 
 implementation
+
+//Default voltage methods: inert for hardware that has no switchable VCC.
+procedure TBaseHardware.SetVoltage(volt18: boolean);
+begin
+  //do nothing
+end;
+
+function TBaseHardware.GetVoltage: TVoltState;
+begin
+  Result := vsUnknown;
+end;
 
 constructor TAsProgrammer.Create;
 begin

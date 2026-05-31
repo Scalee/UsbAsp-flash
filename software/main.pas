@@ -15,7 +15,7 @@ uses
   XMLRead, XMLWrite, DOM, msgstr, Translations, LCLProc, LCLType, LCLTranslator,
   LResources, MPHexEditorEx, MPHexEditor, search, sregedit,
   utilfunc, findchip, DateUtils, lazUTF8,
-  pascalc, ScriptsFunc, ScriptEdit, baseHW, UsbAspHW, ch341hw, ch347hw, avrisphw, arduinohw;
+  pascalc, ScriptsFunc, ScriptEdit, baseHW, UsbAspHW, ch341hw, ch347hw, ch347dll, avrisphw, arduinohw;
 
 type
 
@@ -42,6 +42,9 @@ type
     MenuFT232SPI30Mhz: TMenuItem;
     MenuFT232SPI6Mhz: TMenuItem;
     MenuHWCH347: TMenuItem;
+    MenuCH347Voltage: TMenuItem;
+    MenuCH347Volt3_3V: TMenuItem;
+    MenuCH347Volt1_8V: TMenuItem;
     MenuCH347SPIClock: TMenuItem;
     MenuCH347SPIClock468_75KHz: TMenuItem;
     MenuCH347SPIClock60MHz: TMenuItem;
@@ -175,6 +178,8 @@ type
     procedure MenuGotoOffsetClick(Sender: TObject);
     procedure MenuHWCH341AClick(Sender: TObject);
     procedure MenuHWCH347Click(Sender: TObject);
+    procedure MenuCH347Volt1_8VClick(Sender: TObject);
+    procedure MenuCH347Volt3_3VClick(Sender: TObject);
     procedure MenuHWFT232HClick(Sender: TObject);
     procedure MenuHWUSBASPClick(Sender: TObject);
     procedure MenuItemBenchmarkClick(Sender: TObject);
@@ -200,9 +205,13 @@ type
     procedure VerifyFlash(BlankCheck: boolean = false);
   private
     { private declarations }
+    FCH347ReplugTimer: TTimer;
+    //Re-drive the CH347 voltage shortly after a device arrival event (debounced).
+    procedure CH347ReplugTimer(Sender: TObject);
   public
     { public declarations }
-
+    //Queued from the CH347 device-notify callback when the device is (re)plugged.
+    procedure CH347DeviceArrived(Data: PtrInt);
   end;
 
   procedure LogPrint(text: string);
@@ -212,6 +221,8 @@ type
   procedure Translate(XMLfile: TXMLDocument);
   function OpenDevice: boolean;
   function SetSPISpeed(OverrideSpeed: byte): integer;
+  function CH347VoltageSelected18: boolean;
+  procedure ApplyCH347Voltage;
   procedure SyncUI_ICParam();
   function UserCancel(): boolean;
 
@@ -260,6 +271,15 @@ var
   CurrentLang: string = 'ru';
 
 {$R *.lfm}
+
+//CH347 device-event callback (stdcall, invoked by CH347DLL on a USB arrival/removal). It runs on
+//a DLL/worker thread, so it only queues work onto the main thread - it must not touch the UI or
+//the device directly. iEventStatus = CH347_DEVICE_ARRIVAL (3) when the device is (re)plugged.
+procedure CH347NotifyRoutine(iEventStatus: cardinal); stdcall;
+begin
+  if (iEventStatus = CH347_DEVICE_ARRIVAL) and Assigned(MainForm) then
+    Application.QueueAsyncCall(TDataEvent(@MainForm.CH347DeviceArrived), 0);
+end;
 
 procedure SyncUI_ICParam();
 begin
@@ -435,6 +455,11 @@ begin
     result := false;
     Exit;
   end;
+
+  //For CH347, DevOpen has already re-asserted the selected programming voltage (it drives GPIO6
+  //to the stored selection on every open). So the device always matches the UI selection before
+  //any SPI operation - no read-back/abort needed (GPIO6 cannot be read back reliably once its
+  //direction reverts to input on close/reopen).
 
   LogPrint(STR_CURR_HW+AsProgrammer.Programmer.HardwareName);
   result := true
@@ -1752,6 +1777,7 @@ begin
   begin
     MainForm.MenuSPIClock.Visible:= true;
     MainForm.MenuCH347SPIClock.Visible:= false;
+    MainForm.MenuCH347Voltage.Visible:= false;
     MainForm.MenuAVRISPSPIClock.Visible:= false;
     MainForm.MenuArduinoSPIClock.Visible:= false;
     MainForm.MenuFT232SPIClock.Visible:= false;
@@ -1763,6 +1789,7 @@ begin
   begin
     MainForm.MenuSPIClock.Visible:= false;
     MainForm.MenuCH347SPIClock.Visible:= false;
+    MainForm.MenuCH347Voltage.Visible:= false;
     MainForm.MenuAVRISPSPIClock.Visible:= false;
     MainForm.MenuArduinoSPIClock.Visible:= false;
     MainForm.MenuFT232SPIClock.Visible:= false;
@@ -1773,6 +1800,7 @@ begin
   if programmer = CHW_CH347 then
   begin
     MainForm.MenuCH347SPIClock.Visible:= true;
+    MainForm.MenuCH347Voltage.Visible:= true;
     MainForm.MenuSPIClock.Visible:= false;
     MainForm.MenuAVRISPSPIClock.Visible:= false;
     MainForm.MenuArduinoSPIClock.Visible:= false;
@@ -1785,6 +1813,7 @@ begin
   begin
     MainForm.MenuSPIClock.Visible:= false;
     MainForm.MenuCH347SPIClock.Visible:= false;
+    MainForm.MenuCH347Voltage.Visible:= false;
     MainForm.MenuAVRISPSPIClock.Visible:= true;
     MainForm.MenuArduinoSPIClock.Visible:= false;
     MainForm.MenuFT232SPIClock.Visible:= false;
@@ -1796,6 +1825,7 @@ begin
   begin
     MainForm.MenuSPIClock.Visible:= false;
     MainForm.MenuCH347SPIClock.Visible:= false;
+    MainForm.MenuCH347Voltage.Visible:= false;
     MainForm.MenuAVRISPSPIClock.Visible:= false;
     MainForm.MenuArduinoSPIClock.Visible:= true;
     MainForm.MenuFT232SPIClock.Visible:= false;
@@ -1807,6 +1837,7 @@ begin
   begin
     MainForm.MenuFT232SPIClock.Visible:= true;
     MainForm.MenuCH347SPIClock.Visible:= false;
+    MainForm.MenuCH347Voltage.Visible:= false;
     MainForm.MenuSPIClock.Visible:= false;
     MainForm.MenuAVRISPSPIClock.Visible:= false;
     MainForm.MenuArduinoSPIClock.Visible:= false;
@@ -1935,6 +1966,45 @@ end;
 procedure TMainForm.MenuHWCH347Click(Sender: TObject);
 begin
   SelectHW(CHW_CH347);
+  //Drive the device to the currently selected voltage when the user switches to CH347.
+  ApplyCH347Voltage;
+end;
+
+//Returns true if the UI has 1.8V selected, false if 3.3V.
+function CH347VoltageSelected18: boolean;
+begin
+  Result := MainForm.MenuCH347Volt1_8V.Checked;
+end;
+
+//Pushes the UI voltage selection down to the CH347 hardware object.
+//Opens the device if needed so the GPIO write actually reaches the chip.
+procedure ApplyCH347Voltage;
+var
+  opened: boolean;
+begin
+  if AsProgrammer.Current_HW <> CHW_CH347 then Exit;
+
+  //SetVoltage stores the desired state even if the device is closed (DevOpen re-asserts it),
+  //but to take effect immediately we briefly open the device.
+  opened := AsProgrammer.Programmer.DevOpen;
+  AsProgrammer.Programmer.SetVoltage(CH347VoltageSelected18);
+  if opened then AsProgrammer.Programmer.DevClose;
+
+  if CH347VoltageSelected18 then
+    LogPrint(STR_CH347_VOLT_SET + '1.8V')
+  else
+    LogPrint(STR_CH347_VOLT_SET + '3.3V');
+end;
+
+
+procedure TMainForm.MenuCH347Volt1_8VClick(Sender: TObject);
+begin
+  ApplyCH347Voltage;
+end;
+
+procedure TMainForm.MenuCH347Volt3_3VClick(Sender: TObject);
+begin
+  ApplyCH347Voltage;
 end;
 
 procedure TMainForm.MenuHWFT232HClick(Sender: TObject);
@@ -2834,6 +2904,39 @@ begin
   MPHexEditorEx.InsertMode := false;
   LoadOptions(SettingsFile);
   LoadLangList();
+
+  //Debounce timer for USB replug detection (one-shot: re-armed by the device-arrival callback).
+  FCH347ReplugTimer := TTimer.Create(Self);
+  FCH347ReplugTimer.Enabled := false;
+  FCH347ReplugTimer.Interval := 500;  //let the replugged device finish enumerating
+  FCH347ReplugTimer.OnTimer := @CH347ReplugTimer;
+
+  //Register for CH347 USB arrival/removal events (this is how the vendor app shows "Device
+  //connected"). On a replug the firmware resets GPIO6 to 1.8V, so we re-drive the selection.
+  CH347SetDeviceNotify(0, nil, @CH347NotifyRoutine);
+
+  //Apply the loaded CH347 voltage to the device so the hardware matches the restored UI selection.
+  //(GPIO6 cannot be read back reliably, so we drive the saved selection rather than syncing from it.)
+  if AsProgrammer.Current_HW = CHW_CH347 then
+    ApplyCH347Voltage;
+end;
+
+//Queued from the device-arrival callback (runs on the main thread). Arms the debounce timer; the
+//timer then re-drives the selected voltage, which the firmware reset to 1.8V on replug.
+procedure TMainForm.CH347DeviceArrived(Data: PtrInt);
+begin
+  FCH347ReplugTimer.Enabled := false;  //restart the debounce window
+  FCH347ReplugTimer.Enabled := true;
+end;
+
+procedure TMainForm.CH347ReplugTimer(Sender: TObject);
+begin
+  FCH347ReplugTimer.Enabled := false;  //one-shot
+  if AsProgrammer.Current_HW = CHW_CH347 then
+  begin
+    LogPrint(STR_CH347_RECONNECT);
+    ApplyCH347Voltage;  //re-drive the selected voltage onto the (reverted) device
+  end;
 end;
 
 procedure TMainForm.FormDestroy(Sender: TObject);
@@ -3204,6 +3307,11 @@ begin
     if MainForm.MenuCH347SPIClock468_75KHz.Checked then
       TDOMElement(ParentNode).SetAttribute('ch347_spi_speed', '468_75KHz');
 
+    if MainForm.MenuCH347Volt1_8V.Checked then
+      TDOMElement(ParentNode).SetAttribute('ch347_voltage', '1.8V');
+    if MainForm.MenuCH347Volt3_3V.Checked then
+      TDOMElement(ParentNode).SetAttribute('ch347_voltage', '3.3V');
+
     if MainForm.MenuMW32Khz.Checked then
       TDOMElement(ParentNode).SetAttribute('mw_speed', '32Khz');
     if MainForm.MenuMW16Khz.Checked then
@@ -3290,6 +3398,14 @@ begin
         if OptVal = '1_875MHz' then MainForm.MenuCH347SPIClock1_875MHz.Checked := true;
         if OptVal = '937_5KHz' then MainForm.MenuCH347SPIClock937_5KHz.Checked := true;
         if OptVal = '468_75KHz' then MainForm.MenuCH347SPIClock468_75KHz.Checked := true;
+      end;
+
+      if  Node.Attributes.GetNamedItem('ch347_voltage') <> nil then
+      begin
+        OptVal := UTF16ToUTF8(Node.Attributes.GetNamedItem('ch347_voltage').NodeValue);
+
+        if OptVal = '1.8V' then MainForm.MenuCH347Volt1_8V.Checked := true;
+        if OptVal = '3.3V' then MainForm.MenuCH347Volt3_3V.Checked := true;
       end;
 
 

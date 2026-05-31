@@ -123,6 +123,20 @@ function CH347StreamI2C(iIndex: cardinal;        // Specify the device number
 
 
 
+//Device event notification callback. iEventStatus: 0=device removed, 3=device arrived.
+type mPCH347_NOTIFY_ROUTINE = procedure(iEventStatus: cardinal); stdcall;
+
+const
+  CH347_DEVICE_ARRIVAL     = 3;   //device plugged in
+  CH347_DEVICE_REMOVE_PEND = 1;   //device about to be removed
+  CH347_DEVICE_REMOVE      = 0;   //device removed
+
+//Register a device arrival/removal callback (NULL routine cancels notification).
+function CH347SetDeviceNotify(iIndex: cardinal;
+			     iDeviceID: PCHAR;
+			     iNotifyRoutine: mPCH347_NOTIFY_ROUTINE): boolean; stdcall; external 'CH347DLL.DLL';
+
+
 //Get the GPIO direction and pin level of CH347
 function CH347GPIO_Get(iIndex: cardinal;
 		       iDir: PCHAR;       // Pin direction: GPIo0-7 corresponding bit 0-7,0: input; 1: output

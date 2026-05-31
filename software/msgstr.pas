@@ -47,6 +47,10 @@ resourcestring
   STR_SCRIPT_SEL_SECTION = 'Выберите секцию';
   STR_SCRIPT_RUN_SECTION = 'Выполняется секция: ';
   STR_ERASE_NOTICE       = 'Процесс может длиться больше минуты на больших флешках!';
+  STR_CH347_VOLT_MISMATCH= '%s selected, but the device is at %s. Operation aborted. Check the voltage.';
+  STR_CH347_VOLT_REVERTED= 'Device switched to %s (%s selected). Apply %s?';
+  STR_CH347_VOLT_SET     = 'CH347 voltage set: ';
+  STR_CH347_RECONNECT    = 'CH347 reconnected, reapplying voltage';
 
 implementation
 
